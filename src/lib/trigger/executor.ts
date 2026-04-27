@@ -1,27 +1,13 @@
-import { tasks } from "@trigger.dev/sdk/v3";
-import type {
-  FlowNode,
-  FlowEdge,
-  NodeOutput,
-  RunScope,
-  NodeRunResult,
-} from "@/types";
-import {
-  topologicalSort,
-  getNodesToRun,
-  resolveNodeInputs,
-} from "@/lib/utils/dag";
+import { GoogleGenerativeAI, type Part } from "@google/generative-ai";
+import sharp from "sharp";
+import type { FlowNode, FlowEdge, NodeOutput, RunScope, NodeRunResult } from "@/types";
+import { topologicalSort, getNodesToRun, resolveNodeInputs } from "@/lib/utils/dag";
 import {
   createWorkflowRun,
   createNodeRun,
   updateNodeRun,
   updateWorkflowRun,
 } from "@/lib/db/workflows";
-import type {
-  LLMTaskInput,
-  CropImageTaskInput,
-  ExtractFrameTaskInput,
-} from "@/lib/validations/schemas";
 
 export interface ExecutionResult {
   runId: string;
@@ -30,10 +16,6 @@ export interface ExecutionResult {
   error?: string;
 }
 
-/**
- * Execute a workflow (or subset of nodes) using Trigger.dev tasks.
- * Independent nodes in the same DAG level run in parallel.
- */
 export async function executeWorkflow(
   workflowId: string,
   userId: string,
@@ -42,7 +24,6 @@ export async function executeWorkflow(
   scope: RunScope,
   selectedNodeIds?: string[]
 ): Promise<ExecutionResult> {
-  // 1. Determine which nodes to run
   const nodesToRun = getNodesToRun(nodes, edges, scope, selectedNodeIds);
   const runEdges = edges.filter(
     (e) =>
@@ -50,41 +31,25 @@ export async function executeWorkflow(
       nodesToRun.some((n) => n.id === e.target)
   );
 
-  // 2. Create DB run record
-  const dbRun = await createWorkflowRun(
-    workflowId,
-    userId,
-    scope,
-    selectedNodeIds ?? []
-  );
-
+  const dbRun = await createWorkflowRun(workflowId, userId, scope, selectedNodeIds ?? []);
   const runId = dbRun.id;
   const nodeResults: Record<string, NodeRunResult> = {};
   const nodeOutputs = new Map<string, Record<string, unknown>>();
 
-  // 3. Topological sort → execution levels (each level runs in parallel)
   const levels = topologicalSort(nodesToRun, runEdges);
-
   let overallStatus: "SUCCESS" | "FAILED" | "PARTIAL" = "SUCCESS";
   const failedNodes = new Set<string>();
 
-  // 4. Execute level by level
   for (const level of levels) {
-    // Filter out nodes whose dependencies failed
     const runnableNodes = level.filter((node) => {
-      const upstreams = edges
-        .filter((e) => e.target === node.id)
-        .map((e) => e.source);
+      const upstreams = edges.filter((e) => e.target === node.id).map((e) => e.source);
       return upstreams.every((upId) => !failedNodes.has(upId));
     });
 
     if (runnableNodes.length === 0) continue;
 
-    // Execute all nodes in this level concurrently
     const levelPromises = runnableNodes.map(async (node) => {
       const nodeStart = Date.now();
-
-      // Create node run record
       const nodeRunRecord = await createNodeRun(
         runId,
         node.id,
@@ -92,17 +57,14 @@ export async function executeWorkflow(
         (node.data as { label?: string })?.label
       );
 
-      // Resolve inputs from upstream outputs
       const resolvedInputs = resolveNodeInputs(node, runEdges, nodeOutputs);
 
       try {
-        const output = await executeNode(node, resolvedInputs, runId, nodeRunRecord.id);
+        const output = await executeNode(node, resolvedInputs);
         const durationMs = Date.now() - nodeStart;
 
-        // Store output for downstream nodes
         nodeOutputs.set(node.id, serializeOutput(output));
 
-        // Update DB
         await updateNodeRun(nodeRunRecord.id, {
           status: "SUCCESS",
           inputs: resolvedInputs as Record<string, unknown>,
@@ -111,12 +73,7 @@ export async function executeWorkflow(
           durationMs,
         });
 
-        nodeResults[node.id] = {
-          nodeId: node.id,
-          status: "SUCCESS",
-          output,
-          durationMs,
-        };
+        nodeResults[node.id] = { nodeId: node.id, status: "SUCCESS", output, durationMs };
       } catch (err) {
         const durationMs = Date.now() - nodeStart;
         const errorMessage = err instanceof Error ? err.message : String(err);
@@ -132,50 +89,29 @@ export async function executeWorkflow(
           durationMs,
         });
 
-        nodeResults[node.id] = {
-          nodeId: node.id,
-          status: "FAILED",
-          error: errorMessage,
-          durationMs,
-        };
+        nodeResults[node.id] = { nodeId: node.id, status: "FAILED", error: errorMessage, durationMs };
       }
     });
 
     await Promise.all(levelPromises);
   }
 
-  // 5. If all nodes failed, mark as FAILED
-  if (failedNodes.size === nodesToRun.length) {
+  if (failedNodes.size === nodesToRun.length && nodesToRun.length > 0) {
     overallStatus = "FAILED";
   }
 
-  // 6. Update run record
-  const totalDuration = Object.values(nodeResults).reduce(
-    (sum, r) => sum + r.durationMs,
-    0
-  );
-
-  await updateWorkflowRun(runId, {
-    status: overallStatus,
-    completedAt: new Date(),
-    durationMs: totalDuration,
-  });
+  const totalDuration = Object.values(nodeResults).reduce((sum, r) => sum + r.durationMs, 0);
+  await updateWorkflowRun(runId, { status: overallStatus, completedAt: new Date(), durationMs: totalDuration });
 
   return { runId, status: overallStatus, nodeResults };
 }
 
-/**
- * Execute a single node via Trigger.dev
- */
 async function executeNode(
   node: FlowNode,
-  resolvedInputs: Record<string, unknown>,
-  workflowRunId: string,
-  nodeRunId: string
+  resolvedInputs: Record<string, unknown>
 ): Promise<NodeOutput> {
   const nodeType = node.type;
 
-  // Text and Upload nodes don't need Trigger.dev — their value is their data
   if (nodeType === "textNode") {
     const data = node.data as { content: string };
     return { text: data.content };
@@ -193,112 +129,230 @@ async function executeNode(
     return { videoUrl: data.uploadedUrl };
   }
 
-  // LLM Node → Trigger.dev task
   if (nodeType === "llmNode") {
-    const data = node.data as {
-      model: string;
-      systemPromptOverride?: string;
-      userMessageOverride?: string;
-    };
-
-    const systemPrompt =
-      (resolvedInputs["system_prompt"] as string | undefined) ??
-      data.systemPromptOverride;
-    const userMessage =
-      (resolvedInputs["user_message"] as string | undefined) ??
-      data.userMessageOverride ??
-      "";
-    const imageUrls = resolvedInputs["images"]
-      ? (Array.isArray(resolvedInputs["images"])
-          ? (resolvedInputs["images"] as string[])
-          : [resolvedInputs["images"] as string])
-      : [];
-
-    if (!userMessage) throw new Error("LLM node requires a user message");
-
-    const taskInput: LLMTaskInput = {
-      nodeId: node.id,
-      workflowRunId,
-      nodeRunId,
-      model: data.model as LLMTaskInput["model"],
-      systemPrompt,
-      userMessage,
-      imageUrls,
-    };
-
-    const handle = await tasks.trigger("llm-execute", taskInput);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await (handle as any).waitForCompletion();
-
-    if (result.status === "COMPLETED" && result.output) {
-      return { text: (result.output as { outputText: string }).outputText };
-    }
-    throw new Error(
-      result.status === "FAILED"
-        ? `LLM task failed: ${JSON.stringify(result)}`
-        : `Unexpected task status: ${result.status}`
-    );
+    return executeLLMNode(node, resolvedInputs);
   }
 
-  // Crop Image Node → Trigger.dev task
   if (nodeType === "cropImageNode") {
-    const data = node.data as {
-      xPercent: number;
-      yPercent: number;
-      widthPercent: number;
-      heightPercent: number;
-    };
-
-    const imageUrl = resolvedInputs["image_url"] as string | undefined;
-    if (!imageUrl) throw new Error("Crop Image node requires an image input");
-
-    const taskInput: CropImageTaskInput = {
-      nodeId: node.id,
-      workflowRunId,
-      nodeRunId,
-      imageUrl,
-      xPercent: parseFloat(String(resolvedInputs["x_percent"] ?? data.xPercent)),
-      yPercent: parseFloat(String(resolvedInputs["y_percent"] ?? data.yPercent)),
-      widthPercent: parseFloat(String(resolvedInputs["width_percent"] ?? data.widthPercent)),
-      heightPercent: parseFloat(String(resolvedInputs["height_percent"] ?? data.heightPercent)),
-    };
-
-    const handle = await tasks.trigger("crop-image", taskInput);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await (handle as any).waitForCompletion();
-
-    if (result.status === "COMPLETED" && result.output) {
-      return { imageUrl: (result.output as { outputUrl: string }).outputUrl };
-    }
-    throw new Error(`Crop task failed: ${JSON.stringify(result)}`);
+    return executeCropImageNode(node, resolvedInputs);
   }
 
-  // Extract Frame Node → Trigger.dev task
   if (nodeType === "extractFrameNode") {
-    const data = node.data as { timestamp: string };
-
-    const videoUrl = resolvedInputs["video_url"] as string | undefined;
-    if (!videoUrl) throw new Error("Extract Frame node requires a video input");
-
-    const taskInput: ExtractFrameTaskInput = {
-      nodeId: node.id,
-      workflowRunId,
-      nodeRunId,
-      videoUrl,
-      timestamp: String(resolvedInputs["timestamp"] ?? data.timestamp ?? "50%"),
-    };
-
-    const handle = await tasks.trigger("extract-frame", taskInput);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await (handle as any).waitForCompletion();
-
-    if (result.status === "COMPLETED" && result.output) {
-      return { imageUrl: (result.output as { outputUrl: string }).outputUrl };
-    }
-    throw new Error(`Extract frame task failed: ${JSON.stringify(result)}`);
+    return executeExtractFrameNode(node, resolvedInputs);
   }
 
   throw new Error(`Unknown node type: ${nodeType}`);
+}
+
+async function executeLLMNode(
+  node: FlowNode,
+  resolvedInputs: Record<string, unknown>
+): Promise<NodeOutput> {
+  const data = node.data as {
+    model: string;
+    systemPromptOverride?: string;
+    userMessageOverride?: string;
+  };
+
+  const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GOOGLE_GEMINI_API_KEY is not configured");
+
+  const systemPrompt =
+    (resolvedInputs["system_prompt"] as string | undefined) ?? data.systemPromptOverride;
+  const userMessage =
+    (resolvedInputs["user_message"] as string | undefined) ?? data.userMessageOverride ?? "";
+  const imageUrls: string[] = resolvedInputs["images"]
+    ? Array.isArray(resolvedInputs["images"])
+      ? (resolvedInputs["images"] as string[])
+      : [resolvedInputs["images"] as string]
+    : [];
+
+  if (!userMessage) throw new Error("LLM node requires a user message");
+
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({ model: data.model, systemInstruction: systemPrompt });
+
+  const parts: Part[] = [{ text: userMessage }];
+
+  for (const imageUrl of imageUrls) {
+    try {
+      let base64: string;
+      let mimeType: string;
+
+      if (imageUrl.startsWith("data:")) {
+        const commaIdx = imageUrl.indexOf(",");
+        base64 = imageUrl.slice(commaIdx + 1);
+        mimeType = imageUrl.match(/data:([^;]+)/)?.[1] ?? "image/jpeg";
+      } else {
+        const res = await fetch(imageUrl);
+        if (!res.ok) continue;
+        base64 = Buffer.from(await res.arrayBuffer()).toString("base64");
+        mimeType = res.headers.get("content-type") ?? "image/jpeg";
+      }
+
+      parts.push({
+        inlineData: {
+          data: base64,
+          mimeType: mimeType as "image/jpeg" | "image/png" | "image/webp",
+        },
+      });
+    } catch {
+      // skip images that fail to load
+    }
+  }
+
+  const result = await model.generateContent({ contents: [{ role: "user", parts }] });
+  return { text: result.response.text() };
+}
+
+async function executeCropImageNode(
+  node: FlowNode,
+  resolvedInputs: Record<string, unknown>
+): Promise<NodeOutput> {
+  const data = node.data as {
+    xPercent: number;
+    yPercent: number;
+    widthPercent: number;
+    heightPercent: number;
+  };
+
+  const imageUrl = resolvedInputs["image_url"] as string | undefined;
+  if (!imageUrl) throw new Error("Crop Image node requires an image input");
+
+  const res = await fetch(imageUrl);
+  if (!res.ok) throw new Error("Failed to download image for cropping");
+  const buffer = Buffer.from(await res.arrayBuffer());
+
+  const image = sharp(buffer);
+  const metadata = await image.metadata();
+  if (!metadata.width || !metadata.height) throw new Error("Could not determine image dimensions");
+
+  const xPct = parseFloat(String(resolvedInputs["x_percent"] ?? data.xPercent));
+  const yPct = parseFloat(String(resolvedInputs["y_percent"] ?? data.yPercent));
+  const wPct = parseFloat(String(resolvedInputs["width_percent"] ?? data.widthPercent));
+  const hPct = parseFloat(String(resolvedInputs["height_percent"] ?? data.heightPercent));
+
+  const left = Math.max(0, Math.floor((xPct / 100) * metadata.width));
+  const top = Math.max(0, Math.floor((yPct / 100) * metadata.height));
+  const width = Math.min(Math.floor((wPct / 100) * metadata.width), metadata.width - left);
+  const height = Math.min(Math.floor((hPct / 100) * metadata.height), metadata.height - top);
+
+  const croppedBuffer = await image.extract({ left, top, width, height }).jpeg({ quality: 90 }).toBuffer();
+
+  // Try uploading via Transloadit image template
+  const uploadedUrl = await uploadCroppedImage(croppedBuffer).catch(() => null);
+  if (uploadedUrl) return { imageUrl: uploadedUrl };
+
+  // Fallback: base64 data URL
+  return { imageUrl: `data:image/jpeg;base64,${croppedBuffer.toString("base64")}` };
+}
+
+async function executeExtractFrameNode(
+  node: FlowNode,
+  resolvedInputs: Record<string, unknown>
+): Promise<NodeOutput> {
+  const data = node.data as { timestamp: string };
+  const videoUrl = resolvedInputs["video_url"] as string | undefined;
+  if (!videoUrl) throw new Error("Extract Frame node requires a video input");
+
+  const timestamp = String(resolvedInputs["timestamp"] ?? data.timestamp ?? "50%");
+  const imageUrl = await extractFrameViaTransloadit(videoUrl, timestamp);
+  return { imageUrl };
+}
+
+async function uploadCroppedImage(buffer: Buffer): Promise<string> {
+  const key = process.env.TRANSLOADIT_KEY ?? process.env.NEXT_PUBLIC_TRANSLOADIT_KEY;
+  const templateId =
+    process.env.TRANSLOADIT_IMAGE_TEMPLATE_ID ?? process.env.NEXT_PUBLIC_TRANSLOADIT_IMAGE_TEMPLATE_ID;
+  if (!key || !templateId) throw new Error("Transloadit not configured");
+
+  const formData = new FormData();
+  formData.append(
+    "file",
+    new Blob([new Uint8Array(buffer)], { type: "image/jpeg" }),
+    "cropped.jpg"
+  );
+  formData.append("params", JSON.stringify({ auth: { key }, template_id: templateId }));
+
+  const res = await fetch("https://api2.transloadit.com/assemblies", { method: "POST", body: formData });
+  if (!res.ok) throw new Error("Transloadit upload failed");
+
+  let data = await res.json();
+  if (data.ok !== "ASSEMBLY_COMPLETED") {
+    data = await pollTransloaditAssembly(data.assembly_ssl_url);
+  }
+
+  for (const steps of Object.values(data.results ?? {}) as { ssl_url?: string }[][]) {
+    if (steps?.[0]?.ssl_url) return steps[0].ssl_url;
+  }
+  throw new Error("No output URL from Transloadit");
+}
+
+async function extractFrameViaTransloadit(videoUrl: string, timestamp: string): Promise<string> {
+  const key = process.env.TRANSLOADIT_KEY ?? process.env.NEXT_PUBLIC_TRANSLOADIT_KEY;
+  if (!key) throw new Error("TRANSLOADIT_KEY is not configured");
+
+  const thumbsStep: Record<string, unknown> = {
+    robot: "/video/thumbs",
+    use: "imported",
+    count: 1,
+    format: "jpg",
+    width: 1280,
+    height: 720,
+    resize_strategy: "fit",
+  };
+
+  const trimmed = timestamp.trim();
+  if (trimmed.endsWith("%")) {
+    thumbsStep.percentages = [parseFloat(trimmed) / 100];
+  } else if (trimmed.includes(":")) {
+    const parts = trimmed.split(":").map(Number);
+    let secs = 0;
+    if (parts.length === 3) secs = parts[0] * 3600 + parts[1] * 60 + parts[2];
+    else if (parts.length === 2) secs = parts[0] * 60 + parts[1];
+    thumbsStep.offsets = [secs];
+  } else {
+    const secs = parseFloat(trimmed);
+    thumbsStep.offsets = [isNaN(secs) ? 0 : secs];
+  }
+
+  const formData = new FormData();
+  formData.append(
+    "params",
+    JSON.stringify({
+      auth: { key },
+      steps: {
+        imported: { robot: "/http/import", url: videoUrl },
+        thumbed: thumbsStep,
+      },
+    })
+  );
+
+  const res = await fetch("https://api2.transloadit.com/assemblies", { method: "POST", body: formData });
+  if (!res.ok) throw new Error("Transloadit frame extraction request failed");
+
+  let data = await res.json();
+  if (data.ok !== "ASSEMBLY_COMPLETED") {
+    data = await pollTransloaditAssembly(data.assembly_ssl_url, 120);
+  }
+
+  const result = (data.results?.thumbed as { ssl_url?: string }[] | undefined)?.[0];
+  if (!result?.ssl_url) throw new Error("No frame URL returned from Transloadit");
+  return result.ssl_url;
+}
+
+async function pollTransloaditAssembly(
+  assemblyUrl: string,
+  maxAttempts = 60
+): Promise<Record<string, unknown>> {
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    const res = await fetch(assemblyUrl);
+    const data = await res.json();
+    if (data.ok === "ASSEMBLY_COMPLETED") return data;
+    if (data.error) throw new Error(`Transloadit assembly failed: ${data.error}`);
+  }
+  throw new Error("Transloadit assembly timed out");
 }
 
 function serializeOutput(output: NodeOutput): Record<string, unknown> {
