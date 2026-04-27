@@ -36,7 +36,7 @@
     "framer-motion": "^11.0.0",
     "geist": "^1.7.0",
     "lucide-react": "^0.469.0",
-    "next": "^15.2.3",
+    "next": "^15.5.15",
     "prisma": "^6.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
