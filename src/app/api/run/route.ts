@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
     }
 
-    const result = await executeWorkflow(validated);
+    const result = await executeWorkflow(validated, userId);
 
     // Return updated runs alongside result
     const runs = await getWorkflowRuns(validated.workflowId);
