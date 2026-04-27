@@ -20,7 +20,7 @@ export async function GET(
       return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
     }
 
-    const runs = await getWorkflowRuns(workflowId);
+    const runs = await getWorkflowRuns(workflowId, userId);
     const serialized = serializeRuns(runs);
 
     return NextResponse.json({ runs: serialized }, { status: 200 });

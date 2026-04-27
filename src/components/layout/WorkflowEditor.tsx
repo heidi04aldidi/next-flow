@@ -196,7 +196,7 @@ export default function WorkflowEditor({
       }
     },
     [
-      nodes, edges, workflowId, scope => scope, // eslint-disable-line
+      nodes, edges, workflowId,
       setRunning, setNodeRunning, updateNodeData,
       addRunToHistory, handleSave, isRightSidebarOpen, toggleRightSidebar,
     ]

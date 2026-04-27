@@ -123,7 +123,7 @@ async function uploadFrameToTransloadit(buffer: Buffer): Promise<string> {
   }
 
   const formData = new FormData();
-  const blob = new Blob([buffer], { type: "image/jpeg" });
+  const blob = new Blob([new Uint8Array(buffer)], { type: "image/jpeg" });
   formData.append("file", blob, "frame.jpg");
 
   const params = JSON.stringify({

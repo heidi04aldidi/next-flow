@@ -226,7 +226,7 @@ export const useWorkflowStore = create<WorkflowStore>()(
       state.pushHistory();
 
       const edge: FlowEdge = {
-        ...connection,
+        ...(connection as { source: string; target: string; sourceHandle: string | null; targetHandle: string | null }),
         id: `e-${connection.source}-${connection.target}-${connection.targetHandle ?? "default"}`,
         type: "smoothstep",
         animated: true,

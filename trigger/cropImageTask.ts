@@ -100,7 +100,7 @@ async function uploadToTransloadit(
 
   // Build multipart form
   const formData = new FormData();
-  const blob = new Blob([buffer], { type: mimeType });
+  const blob = new Blob([new Uint8Array(buffer)], { type: mimeType });
   formData.append("file", blob, filename);
 
   // Use simple /assemblies endpoint with store step

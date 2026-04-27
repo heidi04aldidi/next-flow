@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { getWorkflow, getWorkflowRuns, serializeRuns } from "@/lib/db/workflows";
+import type { WorkflowRunRecord } from "@/types";
 import WorkflowEditor from "@/components/layout/WorkflowEditor";
 
 interface WorkflowPageProps {
@@ -15,7 +16,7 @@ export default async function WorkflowPage({ searchParams }: WorkflowPageProps) 
   const workflowId = params.id;
 
   let initialWorkflow = null;
-  let initialRuns = [];
+  let initialRuns: WorkflowRunRecord[] = [];
 
   if (workflowId) {
     const workflow = await getWorkflow(workflowId, userId);
@@ -28,7 +29,7 @@ export default async function WorkflowPage({ searchParams }: WorkflowPageProps) 
         viewport: workflow.viewport as object | undefined,
       };
       const runs = await getWorkflowRuns(workflowId, userId);
-      initialRuns = serializeRuns(runs) as never[];
+      initialRuns = serializeRuns(runs);
     }
   }
 

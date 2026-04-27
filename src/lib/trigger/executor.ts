@@ -227,7 +227,8 @@ async function executeNode(
     };
 
     const handle = await tasks.trigger("llm-execute", taskInput);
-    const result = await handle.waitForCompletion();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await (handle as any).waitForCompletion();
 
     if (result.status === "COMPLETED" && result.output) {
       return { text: (result.output as { outputText: string }).outputText };
@@ -263,7 +264,8 @@ async function executeNode(
     };
 
     const handle = await tasks.trigger("crop-image", taskInput);
-    const result = await handle.waitForCompletion();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await (handle as any).waitForCompletion();
 
     if (result.status === "COMPLETED" && result.output) {
       return { imageUrl: (result.output as { outputUrl: string }).outputUrl };
@@ -287,7 +289,8 @@ async function executeNode(
     };
 
     const handle = await tasks.trigger("extract-frame", taskInput);
-    const result = await handle.waitForCompletion();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await (handle as any).waitForCompletion();
 
     if (result.status === "COMPLETED" && result.output) {
       return { imageUrl: (result.output as { outputUrl: string }).outputUrl };
