@@ -4,6 +4,7 @@ import { executeWorkflow } from "@/lib/trigger/executor";
 import { getWorkflow, getWorkflowRuns, serializeRuns } from "@/lib/db/workflows";
 import { RunWorkflowSchema } from "@/lib/validations/schemas";
 import { ZodError } from "zod";
+import type { FlowNode, FlowEdge } from "@/types";
 
 export async function POST(req: NextRequest) {
   try {
@@ -21,10 +22,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
     }
 
-    const result = await executeWorkflow(validated, userId);
+    const result = await executeWorkflow(
+      validated.workflowId,
+      userId,
+      validated.nodes as unknown as FlowNode[],
+      validated.edges as unknown as FlowEdge[],
+      validated.scope,
+      validated.selectedNodeIds
+    );
 
     // Return updated runs alongside result
-    const runs = await getWorkflowRuns(validated.workflowId);
+    const runs = await getWorkflowRuns(validated.workflowId, userId);
     const serializedRuns = serializeRuns(runs);
 
     return NextResponse.json({ result, runs: serializedRuns }, { status: 200 });
