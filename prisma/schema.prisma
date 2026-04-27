@@ -1,0 +1,82 @@
+// This is your Prisma schema file
+// Learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+model Workflow {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String   @default("Untitled Workflow")
+  description String?
+  nodes       Json     @default("[]")
+  edges       Json     @default("[]")
+  viewport    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  runs WorkflowRun[]
+
+  @@index([userId])
+}
+
+model WorkflowRun {
+  id           String        @id @default(cuid())
+  workflowId   String
+  userId       String
+  status       RunStatus     @default(RUNNING)
+  scope        RunScope      @default(FULL)
+  selectedNodes String[]     @default([])
+  startedAt    DateTime      @default(now())
+  completedAt  DateTime?
+  durationMs   Int?
+  triggerRunId String?       // Trigger.dev run ID
+
+  workflow  Workflow      @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  nodeRuns  NodeRun[]
+
+  @@index([workflowId])
+  @@index([userId])
+}
+
+model NodeRun {
+  id            String      @id @default(cuid())
+  workflowRunId String
+  nodeId        String
+  nodeType      String
+  nodeLabel     String?
+  status        RunStatus   @default(RUNNING)
+  inputs        Json?
+  outputs       Json?
+  error         String?
+  startedAt     DateTime    @default(now())
+  completedAt   DateTime?
+  durationMs    Int?
+  triggerTaskId String?     // Trigger.dev task ID
+
+  workflowRun WorkflowRun @relation(fields: [workflowRunId], references: [id], onDelete: Cascade)
+
+  @@index([workflowRunId])
+  @@index([nodeId])
+}
+
+enum RunStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+  PARTIAL
+  CANCELLED
+}
+
+enum RunScope {
+  FULL
+  PARTIAL
+  SINGLE
+}
