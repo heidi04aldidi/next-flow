@@ -2,8 +2,6 @@
 
 A production-ready, pixel-perfect Krea.ai-inspired LLM workflow builder. Build, connect, and run AI pipelines visually using a node-based canvas.
 
-![NextFlow Preview](https://placeholder.com/preview.png)
-
 ---
 
 ## Features
@@ -13,9 +11,9 @@ A production-ready, pixel-perfect Krea.ai-inspired LLM workflow builder. Build, 
 - **Type-Safe Connections** — Only compatible handle types can be connected
 - **DAG Validation** — Cycles are prevented at the connection level
 - **Parallel Execution** — Independent branches run concurrently via Trigger.dev
-- **Selective Runs** — Run full workflow, selected nodes, or a single node
-- **Run History** — Full node-level execution details in right sidebar
-- **Undo/Redo** — Full history for all canvas mutations
+- **Selective Runs** — Run full workflow, selected nodes, or a single node (To be implemented)
+- **Run History** — Full node-level execution details in right sidebar (To be implemented)
+- **Undo/Redo** — Full history for all canvas mutations (To be implemented)
 - **Export/Import JSON** — Share workflows as portable JSON files
 - **Clerk Auth** — Secure authentication with per-user workflow isolation
 - **Persistent Storage** — Workflows and run history saved to PostgreSQL (Neon)
