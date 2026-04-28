@@ -1,6 +1,8 @@
 # NextFlow — LLM Workflow Builder
 
-A production-ready, [Krea.ai](https://www.krea.ai/nodes)-inspired LLM workflow builder. Build, connect, and run AI pipelines visually using a node-based canvas.
+A production-ready, pixel-perfect Krea.ai-inspired LLM workflow builder. Build, connect, and run AI pipelines visually using a node-based canvas.
+
+![NextFlow](https://nextflow-6rhf7198k-geethikas-projects-d5afde52.vercel.app/sign-up)
 
 ---
 
@@ -12,7 +14,7 @@ A production-ready, [Krea.ai](https://www.krea.ai/nodes)-inspired LLM workflow b
 - **DAG Validation** — Cycles are prevented at the connection level
 - **Parallel Execution** — Independent branches run concurrently via Trigger.dev
 - **Selective Runs** — Run full workflow, selected nodes, or a single node (To be implemented)
-- **Run History** — Full node-level execution details in right sidebar (To be implemented)
+- **Run History** — Full node-level execution details in right sidebar
 - **Undo/Redo** — Full history for all canvas mutations (To be implemented)
 - **Export/Import JSON** — Share workflows as portable JSON files
 - **Clerk Auth** — Secure authentication with per-user workflow isolation
@@ -165,7 +167,7 @@ App available at [http://localhost:3000](http://localhost:3000)
 
 ### Terminal 2: Trigger.dev Dev Worker
 ```bash
-
+npx trigger.dev@latest dev
 ```
 This registers your tasks with Trigger.dev's cloud and runs them locally.
 
