@@ -2,11 +2,10 @@
 
 import { memo, useState, useCallback } from "react";
 import { type NodeProps } from "reactflow";
-import { MoreHorizontal, Trash2, Copy, Play } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { MoreHorizontal, Trash2, Copy } from "lucide-react";
+import { cn, getNodeTypeColor } from "@/lib/utils";
 import { useWorkflowStore } from "@/lib/store/workflowStore";
-import { getNodeTypeColor } from "@/lib/utils";
-import type { NodeType, FlowNodeData } from "@/types";
+import type { NodeType } from "@/types";
 
 interface NodeShellProps {
   nodeId: string;

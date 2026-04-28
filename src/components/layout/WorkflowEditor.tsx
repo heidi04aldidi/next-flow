@@ -8,6 +8,7 @@ import TopToolbar from "./TopToolbar";
 import LeftSidebar from "@/components/sidebar/LeftSidebar";
 import RightSidebar from "@/components/sidebar/RightSidebar";
 import WorkflowCanvas from "@/components/canvas/WorkflowCanvas";
+import { getNodesToRun } from "@/lib/utils/dag";
 import type { FlowNode, FlowEdge, WorkflowRunRecord } from "@/types";
 import type { Viewport } from "reactflow";
 
@@ -37,8 +38,6 @@ export default function WorkflowEditor({
     viewport,
     loadWorkflow,
     setRunHistory,
-    addRunToHistory,
-    updateRunInHistory,
     setRunning,
     setNodeRunning,
     updateNodeData,
@@ -46,10 +45,9 @@ export default function WorkflowEditor({
     setSaving,
     isRightSidebarOpen,
     toggleRightSidebar,
-    runHistory,
   } = useWorkflowStore();
 
-  // Load initial workflow
+  // Load initial workflow and run history
   useEffect(() => {
     if (initialWorkflow) {
       loadWorkflow({
@@ -106,12 +104,9 @@ export default function WorkflowEditor({
 
       setRunning(true);
 
-      // Optimistically set all nodes to running
-      const nodesToRun = scope === "FULL"
-        ? nodes
-        : nodes.filter((n) => selectedIds?.includes(n.id));
-
-      for (const node of nodesToRun) {
+      // Compute which nodes will actually run (including transitive deps for PARTIAL)
+      const actualNodesToRun = getNodesToRun(nodes, edges, scope, selectedIds);
+      for (const node of actualNodesToRun) {
         setNodeRunning(node.id, true);
       }
 
@@ -119,7 +114,7 @@ export default function WorkflowEditor({
       if (!isRightSidebarOpen) toggleRightSidebar();
 
       try {
-        // Save first if not saved
+        // Auto-save before running
         if (!useWorkflowStore.getState().isSaved) {
           await handleSave();
         }
@@ -138,29 +133,30 @@ export default function WorkflowEditor({
 
         if (!response.ok) {
           const err = await response.json();
-          throw new Error(err.message ?? "Run failed");
+          throw new Error((err as { message?: string }).message ?? "Run failed");
         }
 
-        const data = await response.json();
+        const data = await response.json() as {
+          result?: {
+            nodeResults?: Record<string, {
+              status: string;
+              output?: { text?: string; imageUrl?: string; videoUrl?: string };
+              error?: string;
+            }>;
+          };
+          runs?: WorkflowRunRecord[];
+        };
 
-        // Update node data with results
-        for (const [nodeId, nodeResult] of Object.entries(
-          (data.result?.nodeResults ?? {}) as Record<string, { status: string; output?: { text?: string; imageUrl?: string }; error?: string }>
-        )) {
+        // Update each node with its result
+        for (const [nodeId, nodeResult] of Object.entries(data.result?.nodeResults ?? {})) {
           if (nodeResult.status === "SUCCESS" && nodeResult.output) {
-            const updates: Record<string, unknown> = {
-              isRunning: false,
-              hasError: false,
-            };
-
+            const updates: Record<string, unknown> = { isRunning: false, hasError: false };
             if (nodeResult.output.text) {
               updates.outputText = nodeResult.output.text;
-              updates.isExpanded = false;
+              updates.isExpanded = true; // Auto-expand LLM output after run
             }
-            if (nodeResult.output.imageUrl) {
-              updates.outputUrl = nodeResult.output.imageUrl;
-            }
-
+            if (nodeResult.output.imageUrl) updates.outputUrl = nodeResult.output.imageUrl;
+            if (nodeResult.output.videoUrl) updates.uploadedUrl = nodeResult.output.videoUrl;
             updateNodeData(nodeId, updates);
           } else if (nodeResult.status === "FAILED") {
             updateNodeData(nodeId, {
@@ -169,21 +165,16 @@ export default function WorkflowEditor({
               errorMessage: nodeResult.error,
             });
           }
-
           setNodeRunning(nodeId, false);
         }
 
-        // Add to history
-        if (data.run) {
-          addRunToHistory(data.run);
+        // Update run history with fresh server data
+        if (data.runs?.length) {
+          setRunHistory(data.runs);
         }
-
-        // Refresh history from server
-        fetchRunHistory();
       } catch (err) {
         console.error("Run failed:", err);
-        // Clear running states on error
-        for (const node of nodesToRun) {
+        for (const node of actualNodesToRun) {
           setNodeRunning(node.id, false);
           updateNodeData(node.id, {
             isRunning: false,
@@ -197,54 +188,36 @@ export default function WorkflowEditor({
     },
     [
       nodes, edges, workflowId,
-      setRunning, setNodeRunning, updateNodeData,
-      addRunToHistory, handleSave, isRightSidebarOpen, toggleRightSidebar,
+      setRunning, setNodeRunning, updateNodeData, setRunHistory,
+      handleSave, isRightSidebarOpen, toggleRightSidebar,
     ]
   );
 
-  const fetchRunHistory = useCallback(async () => {
-    try {
-      const response = await fetch(`/api/workflows/${workflowId}/runs`);
-      if (response.ok) {
-        const runs = await response.json();
-        setRunHistory(runs);
-      }
-    } catch {
-      // ignore
-    }
-  }, [workflowId, setRunHistory]);
-
-  // Auto-save on interval
+  // Auto-save every 30s
   useEffect(() => {
     const timer = setInterval(() => {
       const state = useWorkflowStore.getState();
       if (!state.isSaved && !state.isSaving && state.nodes.length > 0) {
         handleSave();
       }
-    }, 30000); // 30s auto-save
-
+    }, 30000);
     return () => clearInterval(timer);
   }, [handleSave]);
 
   return (
     <ReactFlowProvider>
       <div className="flex flex-col h-screen overflow-hidden bg-canvas">
-        {/* Top toolbar */}
         <TopToolbar userId={userId} onSave={handleSave} onRun={handleRun} />
 
-        {/* Main content */}
         <div className="flex flex-1 overflow-hidden relative">
-          {/* Left sidebar */}
           <div className="relative flex">
             <LeftSidebar />
           </div>
 
-          {/* Canvas */}
           <main className="flex-1 overflow-hidden relative">
             <WorkflowCanvas />
           </main>
 
-          {/* Right sidebar */}
           <div className="relative flex">
             <RightSidebar />
           </div>
