@@ -165,7 +165,7 @@ App available at [http://localhost:3000](http://localhost:3000)
 
 ### Terminal 2: Trigger.dev Dev Worker
 ```bash
-npx trigger.dev@latest dev
+
 ```
 This registers your tasks with Trigger.dev's cloud and runs them locally.
 
