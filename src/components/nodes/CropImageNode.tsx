@@ -2,8 +2,7 @@
 
 import { memo, useCallback } from "react";
 import { Handle, Position, type NodeProps, useEdges } from "reactflow";
-import { Crop, Image as ImageIcon } from "lucide-react";
-import Image from "next/image";
+import { Crop } from "lucide-react";
 import { NodeShell } from "./NodeShell";
 import { useWorkflowStore } from "@/lib/store/workflowStore";
 import { cn } from "@/lib/utils";
@@ -137,11 +136,10 @@ const CropImageNode = memo(({ id, data }: NodeProps<CropImageNodeData>) => {
       {/* Output preview */}
       {data.outputUrl && (
         <div className="rounded-lg overflow-hidden border border-white/5">
-          <Image
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
             src={data.outputUrl}
             alt="Cropped output"
-            width={280}
-            height={140}
             className="w-full h-28 object-cover"
           />
         </div>

@@ -219,9 +219,15 @@ async function executeCropImageNode(
   const imageUrl = resolvedInputs["image_url"] as string | undefined;
   if (!imageUrl) throw new Error("Crop Image node requires an image input");
 
-  const res = await fetch(imageUrl);
-  if (!res.ok) throw new Error("Failed to download image for cropping");
-  const buffer = Buffer.from(await res.arrayBuffer());
+  let buffer: Buffer;
+  if (imageUrl.startsWith("data:")) {
+    const commaIdx = imageUrl.indexOf(",");
+    buffer = Buffer.from(imageUrl.slice(commaIdx + 1), "base64");
+  } else {
+    const res = await fetch(imageUrl);
+    if (!res.ok) throw new Error("Failed to download image for cropping");
+    buffer = Buffer.from(await res.arrayBuffer());
+  }
 
   const image = sharp(buffer);
   const metadata = await image.metadata();

@@ -1,5 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
+
+export const maxDuration = 120;
 import { executeWorkflow } from "@/lib/trigger/executor";
 import { getWorkflow, getWorkflowRuns, serializeRuns } from "@/lib/db/workflows";
 import { RunWorkflowSchema } from "@/lib/validations/schemas";

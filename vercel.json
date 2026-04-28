@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "src/app/api/run/route.ts": {
+      "maxDuration": 120
+    },
+    "src/app/api/upload/video/route.ts": {
+      "maxDuration": 120
+    }
+  }
+}

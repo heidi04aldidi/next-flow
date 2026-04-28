@@ -141,11 +141,11 @@ export default function WorkflowEditor({
           throw new Error(err.message ?? "Run failed");
         }
 
-        const result = await response.json();
+        const data = await response.json();
 
         // Update node data with results
         for (const [nodeId, nodeResult] of Object.entries(
-          result.nodeResults as Record<string, { status: string; output?: { text?: string; imageUrl?: string }; error?: string }>
+          (data.result?.nodeResults ?? {}) as Record<string, { status: string; output?: { text?: string; imageUrl?: string }; error?: string }>
         )) {
           if (nodeResult.status === "SUCCESS" && nodeResult.output) {
             const updates: Record<string, unknown> = {
@@ -174,8 +174,8 @@ export default function WorkflowEditor({
         }
 
         // Add to history
-        if (result.run) {
-          addRunToHistory(result.run);
+        if (data.run) {
+          addRunToHistory(data.run);
         }
 
         // Refresh history from server

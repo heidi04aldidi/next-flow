@@ -3,7 +3,6 @@
 import { memo, useCallback, useRef, useState } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
 import { ImageIcon, Upload, X, Loader2 } from "lucide-react";
-import Image from "next/image";
 import { NodeShell } from "./NodeShell";
 import { useWorkflowStore } from "@/lib/store/workflowStore";
 import { fileSize, cn } from "@/lib/utils";
@@ -11,6 +10,35 @@ import type { UploadImageNodeData } from "@/types";
 
 const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 const MAX_SIZE_MB = 20;
+const MAX_DIMENSION = 2048;
+
+function compressImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = (e) => {
+      const img = new window.Image();
+      img.onerror = reject;
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
+          const ratio = Math.min(MAX_DIMENSION / width, MAX_DIMENSION / height);
+          width = Math.round(width * ratio);
+          height = Math.round(height * ratio);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) { reject(new Error("Canvas not available")); return; }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", 0.85));
+      };
+      img.src = e.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 const UploadImageNode = memo(({ id, data }: NodeProps<UploadImageNodeData>) => {
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
@@ -34,29 +62,15 @@ const UploadImageNode = memo(({ id, data }: NodeProps<UploadImageNodeData>) => {
       setIsUploading(true);
 
       try {
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("nodeId", id);
-
-        const response = await fetch("/api/upload/image", {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!response.ok) {
-          const err = await response.json();
-          throw new Error(err.message ?? "Upload failed");
-        }
-
-        const result = await response.json();
+        const dataUrl = await compressImage(file);
         updateNodeData(id, {
-          uploadedUrl: result.url,
+          uploadedUrl: dataUrl,
           uploadedName: file.name,
           uploadedSize: file.size,
           mimeType: file.type,
         });
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Upload failed");
+        setError(err instanceof Error ? err.message : "Failed to process image");
       } finally {
         setIsUploading(false);
       }
@@ -97,11 +111,10 @@ const UploadImageNode = memo(({ id, data }: NodeProps<UploadImageNodeData>) => {
       {data.uploadedUrl ? (
         /* Preview */
         <div className="relative rounded-lg overflow-hidden border border-white/5">
-          <Image
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
             src={data.uploadedUrl}
             alt={data.uploadedName ?? "Uploaded"}
-            width={300}
-            height={180}
             className="w-full h-40 object-cover"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
