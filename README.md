@@ -1,8 +1,6 @@
 # NextFlow — LLM Workflow Builder
 
-A production-ready, pixel-perfect Krea.ai-inspired LLM workflow builder. Build, connect, and run AI pipelines visually using a node-based canvas.
-
-![NextFlow](https://nextflow-6rhf7198k-geethikas-projects-d5afde52.vercel.app/sign-up)
+Krea.ai-inspired LLM workflow builder. Build, connect, and run AI pipelines visually using a node-based canvas.
 
 ---
 
